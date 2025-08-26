@@ -133,7 +133,7 @@ small.muted {
   padding: 0;
   margin: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(155px, 1fr));
   gap: 12px;
 }
 .group-item {
@@ -173,6 +173,7 @@ small.muted {
 }
 .group-name {
   font-weight: 700;
+  color: white;
 }
 .group-sub {
   color: var(--muted);
