@@ -321,16 +321,8 @@ export default function Simular() {
                         <td>
                           Grupo {p.group} — {animal?.name}
                           <div className="label">
-                            (dezenas DEMO: {animal?.dezenas.join(", ")})
+                            ({animal?.dezenas.join(", ")})
                           </div>
-                        </td>
-                        <td>
-                          <small className="muted">
-                            {p.from === "sum(m1..m5) % 10000" &&
-                              "Soma dos 5 (mod 10000)"}
-                            {p.from === "penultima-centena(m1*m2)" &&
-                              "Penúltima centena do produto do 1º×2º"}
-                          </small>
                         </td>
                       </tr>
                     );
