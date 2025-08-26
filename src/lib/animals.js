@@ -30,22 +30,28 @@ const ANIMAL_NAMES = [
 ];
 
 // DEMO: 25 grupos * 4 dezenas = 100 dezenas (00–99) distribuídas de forma
-// totalmente algorítmica para fins EDUCATIVOS (não corresponde a tabelas reais).
 export const DEMO_ANIMALS = Array.from({ length: 25 }, (_, i) => {
-  const base = i * 4;
-  const dezenas = [base, base + 1, base + 2, base + 3].map((n) =>
-    String(n).padStart(2, "0")
-  );
+  const start = i * 4 + 1; // 1,5,9,...,97
+  const dezenas = [0, 1, 2, 3]
+    .map((k) => (start + k) % 100) // wrap: 100 -> 0 (vira "00")
+    .map((n) => String(n).padStart(2, "0"));
+
+  const animal = ANIMAL_NAMES[i] ?? `Grupo ${i + 1}`;
+
   return {
     id: i + 1,
-    name: ANIMAL_NAMES[i],
-    dezenas,
+    name: animal, // <- UI usa g.name: agora mostra o bicho
+    animal, // alias semântico (opcional)
+    label: `${String(i + 1).padStart(2, "0")} — ${animal}`, // útil se quiser
+    dezenas, // ex.: G1 = 01,02,03,04 ... G25 = 97,98,99,00
   };
 });
 
 // Util: mapeia um número (0–99) para o índice de grupo 1–25 (4 dezenas por grupo)
 export function groupFromNumber(num0To99) {
-  return Math.floor(num0To99 / 4) + 1;
+  const n = Number(num0To99) % 100;
+  if (n === 0) return 25; // 00 pertence ao último grupo
+  return Math.floor((n - 1) / 4) + 1; // 01..04 -> 1, 05..08 -> 2, ..., 97..00 -> 25
 }
 export function sanitizeDezena(v) {
   return String(v ?? "")

@@ -27,7 +27,7 @@ export default function Nav() {
           <Link href="/">Home</Link>
           <Link href="/regras">Regras (educativo)</Link>
           <Link href="/simular">Simular</Link>
-          <Link href="/sorteio">Sorteio (7 prêmios)</Link>
+          {/* <Link href="/sorteio">Sorteio (7 prêmios)</Link> */}
         </div>
 
         <div style={{ display: "flex", gap: 12, alignItems: "center" }}>

@@ -4,25 +4,24 @@ export const runtime = "nodejs";
 import { NextResponse } from "next/server";
 import crypto from "crypto";
 import { groupFromNumber } from "@/lib/animals";
+import { getUserFromCookie } from "@/lib/auth";
+import { getBalance, incrBy } from "@/lib/coins-blob";
 
 const MAX_STAKE = 50;
 
 // multiplicadores meramente didáticos
 const MULTS = {
-  grupo: 10, // checa contra os 7 prêmios (grupo pela dezena)
-  dezena: 50, // checa contra os 7 prêmios (dezena = últimos 2 dígitos)
-  centena: 150, // checa contra os 6 milhares (últimas 3) + 7º (centena)
-  milhar: 1000, // checa contra os 6 milhares somente
+  grupo: 20,
+  dezena: 70,
+  centena: 650,
+  milhar: 4000,
 };
 
 function err(msg, status = 400) {
   return NextResponse.json({ error: msg }, { status });
 }
 
-// Gera 7 prêmios conforme regras educativas:
-// 1º..5º = 5 milhares independentes
-// 6º     = soma dos 5 primeiros % 10000 (milhar)
-// 7º     = penúltima centena do produto (1º x 2º) => floor(prod/100) % 1000 (centena)
+// 7 prêmios educativos (5 milhares; 6º = soma mod 10000; 7º = penúltima centena de 1º×2º)
 function generateSevenPrizes(seed, timestamp) {
   const hash = crypto
     .createHash("sha256")
@@ -31,22 +30,19 @@ function generateSevenPrizes(seed, timestamp) {
   const blocks = [0, 8, 16, 24, 32].map((start) =>
     hash.slice(start, start + 8)
   );
-  const milhares = blocks.map((h) => parseInt(h, 16) % 10000); // m1..m5 (0..9999)
-
+  const milhares = blocks.map((h) => parseInt(h, 16) % 10000);
   const [m1, m2, m3, m4, m5] = milhares;
-  const m6 = (m1 + m2 + m3 + m4 + m5) % 10000; // 6º milhar
+  const m6 = (m1 + m2 + m3 + m4 + m5) % 10000;
   const produto = m1 * m2;
-  const c7 = Math.floor(produto / 100) % 1000; // 7º centena
+  const c7 = Math.floor(produto / 100) % 1000;
 
-  // helper para anotar dezena/grupo
   const annotate = (value, kind, extra = {}) => {
-    // dezena é sempre os últimos 2 dígitos do número "base" do prêmio
     const dez = value % 100;
     const grp = groupFromNumber(dez);
     return { value, dezena: dez, group: grp, kind, ...extra };
   };
 
-  const prizes = [
+  return [
     { idx: 1, ...annotate(m1, "milhar") },
     { idx: 2, ...annotate(m2, "milhar") },
     { idx: 3, ...annotate(m3, "milhar") },
@@ -61,11 +57,9 @@ function generateSevenPrizes(seed, timestamp) {
       }),
     },
   ];
-
-  return prizes;
 }
 
-// Compara a seleção com os 7 prêmios conforme o modo
+// compara seleção contra uma lista de prêmios (já filtrada pelas colocações)
 function matchSelection(mode, rawSelection, prizes) {
   const hits = [];
 
@@ -96,10 +90,8 @@ function matchSelection(mode, rawSelection, prizes) {
     const selNum = Number(sel);
     prizes.forEach((p) => {
       if (p.kind === "milhar") {
-        const cent = p.value % 1000;
-        if (cent === selNum) hits.push(p.idx);
+        if (p.value % 1000 === selNum) hits.push(p.idx);
       } else {
-        // 7º prêmio é centena "pura"
         if (p.value === selNum) hits.push(p.idx);
       }
     });
@@ -121,49 +113,84 @@ function matchSelection(mode, rawSelection, prizes) {
 
 export async function POST(req) {
   try {
-    const { mode, selection, stake } = await req.json();
+    // exige login
+    const user = getUserFromCookie(req);
+    if (!user?.email) return err("Não autorizado. Faça login para jogar.", 401);
 
-    if (!["grupo", "dezena", "centena", "milhar"].includes(mode)) {
+    const { mode, selection, stake, placements } = await req.json();
+
+    if (!["grupo", "dezena", "centena", "milhar"].includes(mode))
       return err("Modo inválido.");
-    }
 
     const s = Number(stake);
-    if (!Number.isFinite(s) || s <= 0 || s > MAX_STAKE) {
+    if (!Number.isFinite(s) || s <= 0 || s > MAX_STAKE)
       return err(`Stake inválida (1–${MAX_STAKE}).`);
+
+    // valida colocações
+    let cols = Array.isArray(placements) ? placements.slice() : [1]; // default: 1º
+    cols = cols
+      .map((x) => Number(x))
+      .filter((x) => Number.isInteger(x) && x >= 1 && x <= 7);
+    // unique + ordenado
+    cols = Array.from(new Set(cols)).sort((a, b) => a - b);
+    if (cols.length === 0)
+      return err("Escolha ao menos uma colocação (1º–7º).");
+
+    // regra: 7º só é permitido quando modo === "centena"
+    if (cols.includes(7) && mode === "milhar") {
+      return err("No modo MILHAR, o 7º prêmio não está disponível.");
     }
 
-    // seed/timestamp para transparência
+    // saldo atual do usuário
+    const balance = await getBalance(user.email);
+    if (balance < s) return err("Saldo insuficiente.", 400);
+
+    // gera prêmios e filtra pelas colocações escolhidas
     const seed = crypto.randomUUID();
     const timestamp = new Date().toISOString();
+    const allPrizes = generateSevenPrizes(seed, timestamp);
+    const filteredPrizes = allPrizes.filter((p) => cols.includes(p.idx));
 
-    // gera os 7 prêmios conforme regras
-    const prizes = generateSevenPrizes(seed, timestamp);
-
-    // avalia acerto conforme modo
-    const { hits } = matchSelection(mode, selection, prizes);
+    // avalia acerto somente nas colocações selecionadas
+    const { hits } = matchSelection(mode, selection, filteredPrizes);
     const win = hits.length > 0;
 
+    // stake é dividida igualmente entre as colocações
+    const k = cols.length;
+    const perPlacementStake = s / k;
     const multiplier = MULTS[mode] ?? 0;
-    const payoutCoins = win ? s * multiplier : 0;
+
+    // pagamos por acerto dentro das colocações escolhidas
+    const perHitPayout = Math.floor(perPlacementStake * multiplier);
+    const payoutCoins = win ? perHitPayout * hits.length : 0;
+
+    // aplica delta no servidor
+    const delta = -s + payoutCoins;
+    const newBalance = await incrBy(user.email, delta);
 
     return NextResponse.json({
       seed,
       timestamp,
-      prizes, // tabela completa (1..7 c/ dezena e grupo)
+      prizes: allPrizes, // mesa completa (para referência visual)
+      consideredPlacements: cols, // colocações efetivamente consideradas
       mode,
       selection,
-      hits, // índices dos prêmios que deram match
+      hits, // índices (dentro de 1..7) onde deu match
       win,
       appliedStake: s,
+      perPlacementStake,
+      perHitPayout,
       payoutCoins,
       multipliers: MULTS,
+      balance: newBalance,
       notes: {
-        six: "6º = soma dos 5 primeiros (mod 10000)",
-        seven: "7º = penúltima centena do produto do 1º×2º",
-        group: "Grupo é calculado pela dezena (últimos 2 dígitos).",
+        payouts:
+          "Stake dividida igualmente pelas colocações selecionadas; paga por acerto dentro delas.",
+        rule7: "O 7º prêmio só está disponível para o modo CENTENA.",
       },
     });
   } catch (e) {
+    console.error("simulate error:", e);
     return NextResponse.json({ error: "Erro no servidor." }, { status: 500 });
   }
 }
