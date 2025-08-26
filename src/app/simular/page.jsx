@@ -10,7 +10,7 @@ import {
   sanitizeMilhar,
   animalForGroupId,
 } from "@/lib/animals";
-
+import GroupPicker from "@/components/GroupPicker";
 const MAX_STAKE = 50;
 
 const TABS = [
@@ -131,19 +131,13 @@ export default function Simular() {
       <form onSubmit={onSubmit} className="card" style={{ marginTop: 12 }}>
         <div className="row">
           {mode === "grupo" && (
-            <div className="col">
+            <div className="col" style={{ flex: "1 1 100%" }}>
               <div className="label">Grupo</div>
-              <select
-                className="select"
+              <GroupPicker
+                groups={DEMO_ANIMALS}
                 value={selGrupo}
-                onChange={(e) => setSelGrupo(Number(e.target.value))}
-              >
-                {DEMO_ANIMALS.map((g) => (
-                  <option key={g.id} value={g.id}>
-                    {g.id} — {g.name} ({g.dezenas.join(", ")})
-                  </option>
-                ))}
-              </select>
+                onChange={setSelGrupo}
+              />
             </div>
           )}
 
@@ -291,7 +285,6 @@ export default function Simular() {
                     <th>Número</th>
                     <th>Dezena</th>
                     <th>Grupo · Animal</th>
-                    <th>Obs.</th>
                   </tr>
                 </thead>
                 <tbody>
