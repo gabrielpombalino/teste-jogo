@@ -1,4 +1,3 @@
-// src/app/api/simulate/route.js
 export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
@@ -7,21 +6,18 @@ import { groupFromNumber } from "@/lib/animals";
 import { getUserFromCookie } from "@/lib/auth";
 import { getBalance, incrBy } from "@/lib/coins-blob";
 
-const MAX_STAKE = 50;
+const MAX_STAKE = 50; // limite em "coins", permite decimais
 
-// multiplicadores meramente didáticos
-const MULTS = {
-  grupo: 20,
-  dezena: 70,
-  centena: 650,
-  milhar: 4000,
-};
+const MULTS = { grupo: 20, dezena: 70, centena: 650, milhar: 4000 };
 
-function err(msg, status = 400) {
-  return NextResponse.json({ error: msg }, { status });
-}
+const err = (msg, status = 400) =>
+  NextResponse.json({ error: msg }, { status });
 
-// 7 prêmios educativos (5 milhares; 6º = soma mod 10000; 7º = penúltima centena de 1º×2º)
+// helpers monetários (centavos)
+const toCents = (n) => Math.round((Number(n) || 0) * 100);
+const fromCents = (c) => Math.round(Number(c) || 0) / 100;
+
+// ===== SORTEIO (mantém sua regra) =====
 function generateSevenPrizes(seed, timestamp) {
   const hash = crypto
     .createHash("sha256")
@@ -59,7 +55,7 @@ function generateSevenPrizes(seed, timestamp) {
   ];
 }
 
-// compara seleção contra uma lista de prêmios (já filtrada pelas colocações)
+// ===== MATCH =====
 function matchSelection(mode, rawSelection, prizes) {
   const hits = [];
 
@@ -113,80 +109,95 @@ function matchSelection(mode, rawSelection, prizes) {
 
 export async function POST(req) {
   try {
-    // exige login
     const user = getUserFromCookie(req);
     if (!user?.email) return err("Não autorizado. Faça login para jogar.", 401);
 
-    const { mode, selection, stake, placements } = await req.json();
+    const { mode, selection, stake, placements, pricingMode } =
+      await req.json();
 
     if (!["grupo", "dezena", "centena", "milhar"].includes(mode))
       return err("Modo inválido.");
 
-    const s = Number(stake);
-    if (!Number.isFinite(s) || s <= 0 || s > MAX_STAKE)
-      return err(`Stake inválida (1–${MAX_STAKE}).`);
+    // Stake com 2 casas
+    const s = Math.round((Number(stake) || 0) * 100) / 100;
+    if (!(s > 0 && s <= MAX_STAKE))
+      return err(`Stake inválida (0.01–${MAX_STAKE.toFixed(2)}).`);
+    const stakeC = toCents(s);
 
-    // valida colocações
-    let cols = Array.isArray(placements) ? placements.slice() : [1]; // default: 1º
-    cols = cols
-      .map((x) => Number(x))
-      .filter((x) => Number.isInteger(x) && x >= 1 && x <= 7);
-    // unique + ordenado
-    cols = Array.from(new Set(cols)).sort((a, b) => a - b);
+    // Colocações
+    let cols = Array.isArray(placements) ? placements.slice() : [1];
+    cols = Array.from(
+      new Set(
+        cols
+          .map((x) => Number(x))
+          .filter((x) => Number.isInteger(x) && x >= 1 && x <= 7)
+      )
+    ).sort((a, b) => a - b);
     if (cols.length === 0)
       return err("Escolha ao menos uma colocação (1º–7º).");
-
-    // regra: 7º só é permitido quando modo === "centena"
-    if (cols.includes(7) && mode === "milhar") {
+    if (cols.includes(7) && mode === "milhar")
       return err("No modo MILHAR, o 7º prêmio não está disponível.");
+
+    // Pricing mode
+    const pricing = pricingMode === "cover" ? "cover" : "split";
+    const k = cols.length;
+    const mult = MULTS[mode] ?? 0;
+
+    // custo e payout por acerto
+    let costC,
+      perPlacementStakeC = null,
+      perHitPayoutC;
+    if (pricing === "split") {
+      costC = stakeC;
+      perPlacementStakeC = Math.floor(stakeC / k);
+      perHitPayoutC = Math.floor((stakeC * mult) / k);
+    } else {
+      const factor = k === 7 ? 2 : k; // regras “vale”
+      costC = stakeC * factor;
+      perHitPayoutC = Math.floor(stakeC * mult);
     }
 
-    // saldo atual do usuário
+    // Saldo suficiente?
     const balance = await getBalance(user.email);
-    if (balance < s) return err("Saldo insuficiente.", 400);
+    if (balance < fromCents(costC)) return err("Saldo insuficiente.", 400);
 
-    // gera prêmios e filtra pelas colocações escolhidas
+    // Gera prêmios e filtra pelas colocações escolhidas
     const seed = crypto.randomUUID();
     const timestamp = new Date().toISOString();
     const allPrizes = generateSevenPrizes(seed, timestamp);
-    const filteredPrizes = allPrizes.filter((p) => cols.includes(p.idx));
+    const filtered = allPrizes.filter((p) => cols.includes(p.idx));
 
-    // avalia acerto somente nas colocações selecionadas
-    const { hits } = matchSelection(mode, selection, filteredPrizes);
-    const win = hits.length > 0;
+    // Match
+    const { hits } = matchSelection(mode, selection, filtered);
+    const hitsCount = hits.length;
 
-    // stake é dividida igualmente entre as colocações
-    const k = cols.length;
-    const perPlacementStake = s / k;
-    const multiplier = MULTS[mode] ?? 0;
-
-    // pagamos por acerto dentro das colocações escolhidas
-    const perHitPayout = Math.floor(perPlacementStake * multiplier);
-    const payoutCoins = win ? perHitPayout * hits.length : 0;
-
-    // aplica delta no servidor
-    const delta = -s + payoutCoins;
-    const newBalance = await incrBy(user.email, delta);
+    const payoutTotalC = hitsCount > 0 ? perHitPayoutC * hitsCount : 0;
+    const deltaCoins = fromCents(-costC + payoutTotalC);
+    const newBalance = await incrBy(user.email, deltaCoins);
 
     return NextResponse.json({
       seed,
       timestamp,
-      prizes: allPrizes, // mesa completa (para referência visual)
-      consideredPlacements: cols, // colocações efetivamente consideradas
+      prizes: allPrizes,
+      consideredPlacements: cols,
+      pricingMode: pricing,
       mode,
       selection,
-      hits, // índices (dentro de 1..7) onde deu match
-      win,
-      appliedStake: s,
-      perPlacementStake,
-      perHitPayout,
-      payoutCoins,
+      hits,
+      win: hitsCount > 0,
+      appliedStake: s, // stake base
+      costCoins: fromCents(costC), // custo efetivo cobrado
+      perPlacementStake:
+        perPlacementStakeC !== null ? fromCents(perPlacementStakeC) : null,
+      perHitPayout: fromCents(perHitPayoutC),
+      payoutCoins: fromCents(payoutTotalC),
       multipliers: MULTS,
       balance: newBalance,
       notes: {
-        payouts:
-          "Stake dividida igualmente pelas colocações selecionadas; paga por acerto dentro delas.",
-        rule7: "O 7º prêmio só está disponível para o modo CENTENA.",
+        pricing:
+          "Dividir: custo=stake; payout=(stake×mult)/k. Vale: custo=stake×(k ou 2 se k=7); payout=stake×mult.",
+        rule7:
+          "7º prêmio disponível p/ Grupo/Dezena/Centena; indisponível em Milhar.",
       },
     });
   } catch (e) {

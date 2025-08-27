@@ -14,6 +14,8 @@ import GroupPicker from "@/components/GroupPicker";
 import { useAuth } from "@/context/auth";
 import RequireAuth from "@/components/RequireAuth";
 import PlacementsPicker from "@/components/PlacementsPicker";
+import PricingModePicker from "@/components/PricingModePicker";
+
 const MAX_STAKE = 50;
 
 const TABS = [
@@ -27,19 +29,30 @@ function pad(value, len) {
   return String(value).padStart(len, "0");
 }
 
+const fmt = (n) =>
+  Number.isFinite(n)
+    ? n.toLocaleString("pt-BR", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })
+    : "-";
+
 export default function Simular() {
   const { user } = useAuth();
   const { coins, setCoins } = useCoins();
+
   const [mode, setMode] = useState("grupo");
-  const [stake, setStake] = useState(10);
+  const [stake, setStake] = useState(10.0);
   const [selGrupo, setSelGrupo] = useState(1);
   const [selDezena, setSelDezena] = useState("");
   const [selCentena, setSelCentena] = useState("");
   const [selMilhar, setSelMilhar] = useState("");
+  const [placements, setPlacements] = useState([1]);
+  const [pricingMode, setPricingMode] = useState("split"); // 'split' | 'cover'
+
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const lastPayloadRef = useRef(null);
-  const [placements, setPlacements] = useState([1]);
 
   const canPlay = useMemo(
     () => Boolean(user) && coins > 0 && stake > 0 && stake <= MAX_STAKE,
@@ -70,9 +83,7 @@ export default function Simular() {
         setResult({ error: data?.error || "Falha na simulação." });
         return;
       }
-
       if (typeof data?.balance === "number") setCoins(data.balance);
-
       setResult(data);
     } catch {
       setResult({ error: "Falha na simulação." });
@@ -92,6 +103,7 @@ export default function Simular() {
         selection: Number(selGrupo),
         stake: Number(stake),
         placements,
+        pricingMode,
       };
     } else if (mode === "dezena") {
       payload = {
@@ -99,6 +111,7 @@ export default function Simular() {
         selection: sanitizeDezena(selDezena),
         stake: Number(stake),
         placements,
+        pricingMode,
       };
     } else if (mode === "centena") {
       payload = {
@@ -106,12 +119,15 @@ export default function Simular() {
         selection: sanitizeCentena(selCentena),
         stake: Number(stake),
         placements,
+        pricingMode,
       };
     } else {
       payload = {
         mode,
         selection: sanitizeMilhar(selMilhar),
         stake: Number(stake),
+        placements,
+        pricingMode,
       };
     }
 
@@ -122,7 +138,6 @@ export default function Simular() {
   return (
     <main className="card">
       <h1 style={{ marginTop: 0 }}>Simulação Educativa (7 prêmios)</h1>
-      <p className="label">Escolha um modo de aposta:</p>
 
       {/* Tabs */}
       <div className="row" style={{ marginTop: 8, flexWrap: "wrap" }}>
@@ -138,17 +153,6 @@ export default function Simular() {
         ))}
       </div>
 
-      {!user && (
-        <div
-          className="card"
-          style={{ marginTop: 12, borderColor: "var(--warning)" }}
-        >
-          <strong>Você precisa estar logado para jogar.</strong>
-          <p className="label">
-            Use o botão “Entrar” no topo para acessar sua conta.
-          </p>
-        </div>
-      )}
       <RequireAuth
         fallback={
           <div
@@ -178,6 +182,12 @@ export default function Simular() {
                   value={placements}
                   onChange={setPlacements}
                 />
+                <PricingModePicker
+                  mode={mode}
+                  placements={placements}
+                  pricingMode={pricingMode}
+                  onChange={setPricingMode}
+                />
               </div>
             )}
 
@@ -197,6 +207,12 @@ export default function Simular() {
                   mode={mode}
                   value={placements}
                   onChange={setPlacements}
+                />
+                <PricingModePicker
+                  mode={mode}
+                  placements={placements}
+                  pricingMode={pricingMode}
+                  onChange={setPricingMode}
                 />
               </div>
             )}
@@ -220,6 +236,12 @@ export default function Simular() {
                   value={placements}
                   onChange={setPlacements}
                 />
+                <PricingModePicker
+                  mode={mode}
+                  placements={placements}
+                  pricingMode={pricingMode}
+                  onChange={setPricingMode}
+                />
               </div>
             )}
 
@@ -240,41 +262,59 @@ export default function Simular() {
                   value={placements}
                   onChange={setPlacements}
                 />
+                <PricingModePicker
+                  mode={mode}
+                  placements={placements}
+                  pricingMode={pricingMode}
+                  onChange={setPricingMode}
+                />
               </div>
             )}
           </div>
 
           <div className="col" style={{ marginTop: 12 }}>
-            <div className="col" style={{ marginTop: 12, marginBottom: 12 }}>
-              <div className="label">Stake (coins)</div>
-              <input
-                className="input"
-                type="number"
-                value={stake}
-                min={1}
-                max={MAX_STAKE}
-                onChange={(e) => setStake(Number(e.target.value))}
-              />
-              <small className="muted">
-                Máximo por simulação: {MAX_STAKE} coins
-              </small>
+            <div className="label">Stake (coins)</div>
+            <input
+              className="input"
+              type="number"
+              step="0.01"
+              value={stake}
+              min={0.01}
+              max={MAX_STAKE}
+              onChange={(e) => {
+                const raw = Number(e.target.value);
+                if (!Number.isFinite(raw)) return setStake(0);
+                const clamped = Math.max(0, Math.min(MAX_STAKE, raw));
+                setStake(Math.round(clamped * 100) / 100);
+              }}
+            />
+            <small className="muted">
+              Máximo por simulação: {MAX_STAKE.toFixed(2)} coins
+            </small>
+
+            <div className="label" style={{ marginTop: 8 }}>
+              Saldo: <strong>{fmt(coins)}</strong>
             </div>
 
-            <button className="button" disabled={!canPlay || loading}>
-              {loading ? "Simulando..." : "Simular"}
-            </button>
-            <button
-              type="button"
-              className="button ghost"
-              onClick={async () => {
-                const res = await fetch("/api/coins/reset", { method: "POST" });
-                const json = await res.json().catch(() => ({}));
-                if (res.ok && typeof json.balance === "number")
-                  setCoins(json.balance);
-              }}
-            >
-              Resetar coins (1000)
-            </button>
+            <div className="row" style={{ marginTop: 12 }}>
+              <button className="button" disabled={!canPlay || loading}>
+                {loading ? "Simulando..." : "Simular"}
+              </button>
+              <button
+                type="button"
+                className="button ghost"
+                onClick={async () => {
+                  const res = await fetch("/api/coins/reset", {
+                    method: "POST",
+                  });
+                  const json = await res.json().catch(() => ({}));
+                  if (res.ok && typeof json.balance === "number")
+                    setCoins(json.balance);
+                }}
+              >
+                Resetar coins (1000,00)
+              </button>
+            </div>
           </div>
         </form>
 
@@ -285,6 +325,21 @@ export default function Simular() {
               <p style={{ color: "var(--danger)" }}>{result.error}</p>
             ) : (
               <>
+                <div className="row">
+                  <div className="col">
+                    <div className="label">Seed</div>
+                    <code style={{ userSelect: "all" }}>{result.seed}</code>
+                  </div>
+                  <div className="col">
+                    <div className="label">Timestamp</div>
+                    <code style={{ userSelect: "all" }}>
+                      {result.timestamp}
+                    </code>
+                  </div>
+                </div>
+
+                <hr />
+
                 <div className="row">
                   <div className="col">
                     <div className="label">Resumo</div>
@@ -304,34 +359,34 @@ export default function Simular() {
                           <strong>{result.hits.join(", ")}º</strong>
                         </>
                       ) : null}{" "}
-                      • stake total: <strong>{result.appliedStake}</strong> •
-                      colocações:{" "}
+                      • stake base: <strong>{fmt(result.appliedStake)}</strong>{" "}
+                      • colocações:{" "}
                       <strong>
                         {result.consideredPlacements?.join(", ")}º
                       </strong>{" "}
-                      • stake/colocação:{" "}
-                      <strong>{Math.round(result.perPlacementStake)}</strong> •
-                      prêmio por acerto: <strong>{result.perHitPayout}</strong>{" "}
-                      • prêmio total: <strong>{result.payoutCoins}</strong> •
-                      novo saldo:{" "}
+                      • modo:{" "}
                       <strong>
-                        {typeof result.balance === "number"
-                          ? result.balance
-                          : "-"}
-                      </strong>
+                        {result.pricingMode === "cover"
+                          ? "Vale"
+                          : "Dividir stake"}
+                      </strong>{" "}
+                      • <u>custo total</u>:{" "}
+                      <strong>{fmt(result.costCoins)}</strong>
+                      {result.perPlacementStake != null && (
+                        <>
+                          {" "}
+                          • stake/colocação:{" "}
+                          <strong>{fmt(result.perPlacementStake)}</strong>
+                        </>
+                      )}{" "}
+                      • payout por acerto:{" "}
+                      <strong>{fmt(result.perHitPayout)}</strong> • payout
+                      total: <strong>{fmt(result.payoutCoins)}</strong> • novo
+                      saldo: <strong>{fmt(result.balance)}</strong>
                     </p>
                     <small className="muted">
-                      Regra: o 7º prêmio está disponível para{" "}
-                      <strong>Grupo</strong>, <strong>Dezena</strong> e{" "}
-                      <strong>Centena</strong>. No modo <strong>Milhar</strong>,
-                      o 7º não está disponível.
-                    </small>
-                    <small className="muted">
-                      Multiplicadores (educativo): grupo=
-                      {result.multipliers.grupo}x · dezena=
-                      {result.multipliers.dezena}x · centena=
-                      {result.multipliers.centena}x · milhar=
-                      {result.multipliers.milhar}x
+                      7º disponível para <strong>Grupo/Dezena/Centena</strong>;
+                      indisponível em <strong>Milhar</strong>.
                     </small>
                   </div>
                 </div>
@@ -350,7 +405,7 @@ export default function Simular() {
                       <th>#</th>
                       <th>Tipo</th>
                       <th>Número</th>
-
+                      <th>Dezena</th>
                       <th>Grupo · Animal</th>
                     </tr>
                   </thead>
@@ -363,7 +418,6 @@ export default function Simular() {
                       const dez = pad(p.dezena, 2);
                       const animal = animalForGroupId(p.group);
                       const isHit = result.hits?.includes(p.idx);
-
                       return (
                         <tr
                           key={p.idx}
@@ -379,7 +433,7 @@ export default function Simular() {
                           <td>
                             <strong>{shown}</strong>
                           </td>
-
+                          <td>{dez}</td>
                           <td>
                             Grupo {p.group} — {animal?.name}
                             <div className="label">
