@@ -11,7 +11,6 @@ export default function PricingModePicker({
   const has7 = placements?.includes?.(7);
 
   // fator dos "vales": 1–7 = 2×; demais = k×
-  const factor = k === 7 ? 2 : k;
 
   return (
     <div className="card" style={{ marginTop: 12 }}>
@@ -23,7 +22,7 @@ export default function PricingModePicker({
           onClick={() => onChange("split")}
           title="Divide a stake igualmente entre as colocações selecionadas."
         >
-          Dividir stake
+          Dividir
         </button>
         <button
           type="button"
@@ -31,7 +30,7 @@ export default function PricingModePicker({
           onClick={() => onChange("cover")}
           title="Cobra multiplicadores de custo (vale)."
         >
-          Vale (cobre colocações)
+          Vale
         </button>
       </div>
 
